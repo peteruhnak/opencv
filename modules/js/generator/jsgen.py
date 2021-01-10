@@ -69,6 +69,8 @@
 
 from __future__ import print_function
 import sys, re, os
+from typing import Any, Dict, List, Optional
+
 import hdr_parser
 from templates import *
 
@@ -94,7 +96,7 @@ ignore_list = ['locate',  #int&
                'meanShift' #Rect&
                ]
 
-def makeWhiteList(module_list):
+def makeWhiteList(module_list: List[Dict[str, List[str]]]) -> Dict[str, List[str]]:
     wl = {}
     for m in module_list:
         for k in m.keys():
@@ -104,7 +106,7 @@ def makeWhiteList(module_list):
                 wl[k] = m[k]
     return wl
 
-def load_white_list(white_list_path):
+def load_white_list(white_list_path: str) -> Dict[str, List[str]]:
     # `opencv_js.config.py`
     #   * calls `makeWhiteList()` provided via `globals_dict`
     #   * stores output in `white_list` variable in `locals_dict`
@@ -115,7 +117,7 @@ def load_white_list(white_list_path):
     assert white_list, white_list_path + ' did not define `white_list` variable'
     return white_list
 
-white_list = None
+white_list: Dict[str, List[str]] = None
 
 # Features to be exported
 export_enums = False
@@ -150,12 +152,13 @@ class ClassProp(object):
 
 class ClassInfo(object):
     def __init__(self, name, decl=None):
-        self.cname = name.replace(".", "::")
-        self.name = self.wname = normalize_class_name(name)
-        self.ismap = False
-        self.issimple = False
-        self.isalgorithm = False
-        self.methods = {}
+        self.cname: str = name.replace(".", "::")
+        self.wname: str = normalize_class_name(name)
+        self.name: str = self.wname
+        self.ismap: bool = False
+        self.issimple: bool = False
+        self.isalgorithm: bool = False
+        self.methods: Dict[str, FuncInfo] = {}
         self.ext_constructors = {}
         self.props = []
         self.consts = {}
@@ -251,23 +254,25 @@ class ArgInfo(object):
         self.py_inputarg = False
         self.py_outputarg = False
 
+
 class FuncVariant(object):
     def __init__(self, class_name, name, decl, is_constructor, is_class_method, is_const, is_virtual, is_pure_virtual, ref_return, const_return):
-        self.class_name = class_name
-        self.name = self.wname = name
-        self.is_constructor = is_constructor
-        self.is_class_method = is_class_method
-        self.is_const = is_const
-        self.is_virtual = is_virtual
-        self.is_pure_virtual = is_pure_virtual
+        self.class_name: str = class_name
+        self.name: str = name
+        self.wname: str = name
+        self.is_constructor: bool = is_constructor
+        self.is_class_method: bool = is_class_method
+        self.is_const: bool = is_const
+        self.is_virtual: bool = is_virtual
+        self.is_pure_virtual: bool = is_pure_virtual
         self.refret = ref_return
         self.constret = const_return
-        self.rettype = handle_vector(handle_ptr(decl[1]).strip()).strip()
+        self.rettype: str = handle_vector(handle_ptr(decl[1]).strip()).strip()
         if self.rettype == "void":
             self.rettype = ""
-        self.args = []
+        self.args: List[ArgInfo] = []
         self.array_counters = {}
-        self.docstring = decl[5]
+        self.docstring: Optional[str] = decl[5]
 
         for a in decl[3]:
             ainfo = ArgInfo(a)
@@ -283,22 +288,22 @@ class FuncVariant(object):
 
 class FuncInfo(object):
     def __init__(self, class_name, name, cname, namespace, isconstructor):
-        self.class_name = class_name
-        self.name = name
-        self.cname = cname
-        self.namespace = namespace
-        self.variants = []
-        self.is_constructor = isconstructor
+        self.class_name: str = class_name
+        self.name: str = name
+        self.cname: str = cname
+        self.namespace: Namespace = namespace
+        self.variants: List[FuncVariant] = []
+        self.is_constructor: bool = isconstructor
 
-    def add_variant(self, variant):
+    def add_variant(self, variant: FuncVariant):
         self.variants.append(variant)
 
 
 class Namespace(object):
     def __init__(self):
-        self.funcs = {}
-        self.enums = {}
-        self.consts = {}
+        self.funcs: Dict[str, FuncInfo] = {}
+        self.enums: Dict[str, List[str]] = {}
+        self.consts: Dict[str, str] = {}
 
 
 class JSWrapperGenerator(object):
@@ -307,9 +312,9 @@ class JSWrapperGenerator(object):
         self.bindings = []
         self.wrapper_funcs = []
 
-        self.classes = {}
-        self.namespaces = {}
-        self.enums = {}
+        self.classes: Dict[str, ClassInfo] = {}
+        self.namespaces: Dict[str, Namespace] = {}
+        self.enums: Dict[str, List[str]] = {}
 
         self.parser = hdr_parser.CppHeaderParser()
         self.class_idx = 0
