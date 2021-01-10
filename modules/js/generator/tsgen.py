@@ -1,5 +1,5 @@
-from typing import Dict, List
-from jsgen import JSWrapperGenerator, ArgInfo, FuncInfo, FuncVariant
+from typing import Dict, List, Optional, TypedDict
+from jsgen import ClassInfo, JSWrapperGenerator, ArgInfo, FuncInfo, FuncVariant
 
 from string import Template
 
@@ -49,10 +49,10 @@ ignore_list = [
 arg_type_mapping = {
     "": "void",
     "cv::Mat": "Mat",
-    "std::vector<int>": "IntVector",
-    "std::vector<float>": "FloatVector",
-    "vector_float": "FloatVector",
-    "std::vector<double>": "DoubleVector",
+    "std::vector<int>": "IntVector|int[]",
+    "std::vector<float>": "FloatVector|float[]",
+    "vector_float": "FloatVector|float[]",
+    "std::vector<double>": "DoubleVector|double[]",
     "std::vector<Point>": "PointVector",
     "std::vector<cv::Mat>": "MatVector",
     "std::vector<Rect>": "RectVector",
@@ -76,7 +76,7 @@ arg_type_mapping = {
     "Scalar": "ScalarLike",
     "TermCriteria": "TermCriteriaLike",
     "UsacParams": "unknown",
-    "Moments": "unknown",
+    "Moments": "MomentsLike",
     "Net": "unknown",
 }
 
@@ -85,7 +85,7 @@ func_imports_template = Template(
 import { Mat } from '../core/Mat'
 import { IntVector, FloatVector, PointVector, MatVector, RectVector, KeyPointVector, DMatchVector, DMatchVectorVector } from '../core/vectors'
 import { DrawMatchesFlags } from './enums'
-import { SizeLike, PointLike, Point2fLike, RectLike, TermCriteriaLike, ScalarLike, RotatedRectLike } from '../core/valueObjects'
+import { SizeLike, PointLike, Point2fLike, RectLike, TermCriteriaLike, ScalarLike, RotatedRectLike, MomentsLike } from '../core/valueObjects'
 """
 )
 
@@ -149,13 +149,12 @@ $body
 
 
 class TsGen:
-    bindings: List
     output_dir: str
     generator: JSWrapperGenerator
-    modules_white_list: Dict
+    modules_white_list: Dict[str, List[str]]
 
     def __init__(
-        self, output_dir: str, generator: JSWrapperGenerator, modules_white_list: str
+        self, output_dir: str, generator: JSWrapperGenerator, modules_white_list: Dict[str, List[str]]
     ):
         self.output_dir = output_dir
         self.generator = generator
@@ -177,8 +176,9 @@ class TsGen:
         return method_name not in self.modules_white_list[module_name]
 
     def gen_consts(self):
+        bindings: List[str] = []
         # conflict between numerous CALIB_* constants from cv::fisheye::CALIB_* and from cv::CALIB_*
-        added_consts = {}
+        added_consts: Dict[str, bool] = {}
         for ns_name, ns in sorted(self.generator.namespaces.items()):
             if ns_name.split(".")[0] != "cv":
                 continue
@@ -186,11 +186,11 @@ class TsGen:
                 if name in added_consts:
                     continue
                 added_consts[name] = True
-                self.bindings.append(
+                bindings.append(
                     const_template.substitute(js_name=name, value=const)
                 )
 
-        out_contents = "".join(self.bindings)
+        out_contents = "".join(bindings)
         self.write_file("constants", out_contents)
 
     def gen_funcs(self):
@@ -220,11 +220,10 @@ class TsGen:
         self.write_file("functions", out_contents)
         pass
 
-    def gen_function(self, func: FuncInfo, class_info):
+    def gen_function(self, func: FuncInfo, class_info: Optional[ClassInfo]):
         result = ""
 
-        variants: List[FuncVariant] = func.variants
-        for var in variants:
+        for var in func.variants:
             args = []
             for arg in var.args:
                 arg_type = self.get_type(arg.tp)
@@ -255,6 +254,11 @@ class TsGen:
                     return_type=self.get_type(var.rettype),
                 )
             elif var.is_constructor:
+                result += constructor_template.substitute(
+                    comment=docstring,
+                    args=", ".join(args),
+                )
+            elif 'Ptr<' in var.rettype:
                 result += constructor_template.substitute(
                     comment=docstring,
                     args=", ".join(args),
@@ -293,7 +297,7 @@ class TsGen:
     def gen_class(self, class_name, class_info):
         if class_name == "segmentation_IntelligentScissorsMB":
             class_name = "IntelligentScissorsMB"
-
+        
         class_body = ""
 
         for prop in class_info.props:
@@ -319,12 +323,13 @@ class TsGen:
                 class_body += method_body
 
         extends = "EmClassHandle"
-        """
         if class_info.bases != []:
-            extends = class_info.bases[0]
             if len(class_info.bases) > 1:
                 print(f"WARNING: Class `${class_name}` has multiple parents: {class_info.bases}")
-        """
+            parent_name = class_info.bases[0]
+            # TODO: there are typing conflicts/overloads to be resolved for some parent classes
+            if parent_name in ['Feature2D', 'DescriptorMatcher']:
+              extends = parent_name
 
         docstring = class_info.docstring
         if docstring is None:
@@ -364,5 +369,6 @@ class TsGen:
 
     def write_file(self, base_name: str, contents: str):
         file_path = self.output_dir + "/" + base_name + ".d.ts"
-        with open(file_path, "w") as f:
+        with open(file_path, "w", newline='\n') as f:
             f.write(contents)
+        print(f'Written {file_path}')
